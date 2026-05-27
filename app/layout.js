@@ -1,6 +1,6 @@
 export const metadata = {
-  title: 'Sprinter Tracker',
-  description: 'Facebook Marketplace van listings — tracked over time',
+  title: 'Auto Marketplace Tracker',
+  description: 'Facebook Marketplace vehicle listings — tracked over time',
 };
 
 export default function RootLayout({ children }) {

@@ -1,8 +1,8 @@
 {
-  "name": "sprinter-tracker",
+  "name": "auto-marketplace-tracker",
   "version": "0.1.0",
   "private": true,
-  "description": "Facebook Marketplace van listing tracker — scrape, dedup, track price history, and browse via a local web UI.",
+  "description": "Facebook Marketplace vehicle listing tracker — scrape, dedup, track price history, and browse via a local web UI.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

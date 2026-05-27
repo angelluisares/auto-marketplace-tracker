@@ -1,6 +1,6 @@
-# Sprinter Tracker
+# Auto Marketplace Tracker
 
-Tracks Facebook Marketplace van listings over time: scrape → dedup → record price history → browse in a local web UI.
+Tracks Facebook Marketplace vehicle listings over time: scrape → dedup → record price history → browse in a local web UI.
 
 ## Pieces
 

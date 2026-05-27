@@ -20,7 +20,7 @@ export default function Page() {
   const [data, setData] = useState({ rows: [], count: 0, facets: { makes: [], states: [], total: {} } });
   const [loading, setLoading] = useState(true);
   const [f, setF] = useState({
-    q: '', make: '', state: '', vansOnly: true, hideJunk: true, activeOnly: false,
+    q: '', make: '', state: '', vansOnly: false, hideJunk: true, activeOnly: false,
     minPrice: '', maxPrice: '', maxMileage: '', sort: 'last_seen', dir: 'desc',
   });
 
@@ -44,7 +44,7 @@ export default function Page() {
   return (
     <main>
       <header>
-        <h1>Sprinter Tracker</h1>
+        <h1>Auto Marketplace Tracker</h1>
         <span className="meta">
           {data.facets.total?.n ?? 0} tracked · {data.facets.total?.active ?? 0} active · showing {data.count}
         </span>
