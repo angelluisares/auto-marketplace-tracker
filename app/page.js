@@ -48,6 +48,8 @@ export default function Page() {
         <span className="meta">
           {data.facets.total?.n ?? 0} tracked · {data.facets.total?.active ?? 0} active · showing {data.count}
         </span>
+        <a className="findlink" href="/search">🔎 Find a vehicle…</a>
+        <a className="savedlink" href="/searches">Saved searches</a>
       </header>
 
       <div className="filters">
@@ -104,6 +106,8 @@ export default function Page() {
         header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; }
         h1 { font-size: 20px; margin: 0; }
         .meta { color: #666; font-size: 13px; }
+        .findlink { margin-left: auto; color: #fff; background: #1f4e78; padding: 6px 12px; border-radius: 6px; font-size: 13px; text-decoration: none; font-weight: 600; }
+        .savedlink { color: #1f4e78; font-size: 13px; text-decoration: none; font-weight: 600; }
         .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
         .filters input, .filters select { padding: 6px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
         .filters label { font-size: 13px; color: #333; display: flex; align-items: center; gap: 4px; cursor: pointer; }

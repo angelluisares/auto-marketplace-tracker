@@ -1,41 +1,76 @@
 # Auto Marketplace Tracker
 
-Tracks Facebook Marketplace vehicle listings over time: scrape → dedup → record price history → browse in a local web UI.
+Tracks Facebook Marketplace vehicle listings over time **and** lets you search for a
+specific vehicle on demand: scrape → dedup → record price history → browse / search in
+a local web UI, backed by a shared hosted Postgres.
 
 ## Pieces
 
-- **`marketplace_tracker.cjs`** — ingests scrape batches into a shared hosted **Postgres** DB, dedups by FB listing ID, tracks `first_seen` / `last_seen` / price history, and exports an xlsx.
-- **`lib/pg.js`** — shared Postgres pool + schema. **`lib/parse.js`** — parsers + van/junk classifiers. **`lib/db.js`** — web read layer.
-- **`app/`** — a Next.js web UI to view, sort, and filter the tracked listings.
+- **`scrape.cjs`** — standalone **Playwright** scraper. Drives a real (headed) Chrome from
+  the command line to read logged-out Marketplace pages and writes batches to
+  `sweep_batches/`. No browser extension, fully scriptable.
+- **`marketplace_tracker.cjs`** — ingests scrape batches into the shared **Postgres** DB,
+  dedups by FB listing ID, tracks `first_seen`/`last_seen`/price history, exports an xlsx.
+- **`scheduler.cjs`** — worker that re-runs *scheduled* searches on their interval.
+- **`lib/`** — `pg.js` (pool + schema), `parse.js` (listing parser + van/junk classifiers),
+  `db.js` (web read layer), `searchParse.js` (free-text → query + filters),
+  `searchJobs.js` (live search jobs), `searchStore.js` (search history + scheduling),
+  `grid.cjs` (shared metro grid).
+- **`app/`** — Next.js UI: browse all (`/`), find a vehicle (`/search`), saved & scheduled
+  searches (`/searches`); APIs `/api/listings`, `/api/search`, `/api/searches`.
 - **`sweep_batches/`** — raw scrape output (gitignored).
 
-> The database is **hosted Postgres (Neon)** so multiple machines can scrape into one shared dataset. Set `DATABASE_URL` in `.env.local` (copy from `.env.example`). See `HANDOFF.md` for full setup.
+> The database is **hosted Postgres (Neon)** so multiple machines share one dataset.
+> Set `DATABASE_URL` in `.env.local` (copy `.env.example`). See `HANDOFF.md`.
 
 ## Data model
 
-- **`listings`** — one row per unique listing (current state): current price, `first_price`, `first_seen`, `last_seen`, `times_seen`, `is_active`, content `hash`.
-- **`observations`** — append-only log; one row each time a listing is seen, giving full price history.
+- **`listings`** — one row per unique listing (current state): price, `first_price`,
+  `first_seen`, `last_seen`, `times_seen`, `is_active`, parsed year/make/model/…, `hash`.
+- **`observations`** — append-only log; one row each time a listing is seen → price history.
+- **`searches`** — saved searches: text, parsed query/filters, run stats, and scheduling
+  (`scheduled`, `interval_minutes`, `next_run_at`).
 
 ## Usage
 
 ```bash
-npm install
-cp .env.example .env.local     # then paste the real Neon DATABASE_URL
+npm install                    # installs playwright-core; uses your system Chrome
+cp .env.example .env.local     # paste the real Neon DATABASE_URL
 
-# ingest a scrape batch (and export xlsx) — UPSERTs into the shared Postgres
-npm run ingest -- sweep_merged.json --export
+# scrape cities (all-vehicles category) then ingest
+node scrape.cjs atlanta charlotte nashville              # -> sweep_batches/<city>_vehicles.json
+node marketplace_tracker.cjs ingest sweep_batches/atlanta_vehicles.json --export
 
-# run the web UI
-npm run dev          # http://localhost:3000
+# or a keyword search across cities
+node scrape.cjs --query "camaro zl1" atlanta dallas miami
+
+# web UI
+npm run dev                    # http://localhost:3000
+
+# scheduled-search worker (separate terminal, keep running)
+node scheduler.cjs
 ```
 
 ## How scraping works
 
-Listings are scraped from logged-out Marketplace search pages (`/marketplace/<city>/search?query=…`), which are public but cap each search at ~40 results. Coverage comes from sweeping a **grid of cities × van queries** and unioning the results (deduped by ID). No account, no credentials.
+`scrape.cjs` opens a real logged-out Chrome (Playwright, `channel: 'chrome'`) and reads
+either the `/marketplace/<city>/vehicles` category or `/marketplace/<city>/search?query=…`.
+Logged-out caps each page at ~40 results, so coverage comes from sweeping a **grid of
+cities** and unioning results (deduped by ID). No account, no credentials, no extension.
+
+## Web app
+
+- **`/`** — browse / filter / sort all tracked listings.
+- **`/search`** — type free text like `camaro zl1 under 25,000 miles`; it scrapes the metro
+  grid for the keywords, ingests, then shows matches filtered by the parsed limits.
+- **`/searches`** — every previous search; mark any as scheduled and pick an interval
+  (6h / 12h / daily / …). `scheduler.cjs` re-runs them automatically.
 
 ## Roadmap
 
-- Finish the multi-city sweep + broaden beyond vans
-- Deploy the Next.js app publicly (multi-user) + auth
-- Scheduled re-scrapes + price-drop alerts
-- (Later) migrate Neon → self-hosted Postgres (plain `pg_dump`/`pg_restore`)
+- ✅ Standalone scraper + shared Postgres + web UI
+- ✅ On-demand search + saved/scheduled searches
+- ⬜ Deploy publicly (multi-user) + auth
+- ⬜ Price-drop / new-match alerts (email/push)
+- ⬜ Smarter ranking & scam/price-sanity filtering
+- ⬜ (Later) migrate Neon → self-hosted Postgres (`pg_dump`/`pg_restore`)

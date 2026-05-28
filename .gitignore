@@ -6,6 +6,9 @@
 # dependencies
 node_modules/
 
+# playwright scraper browser profile (local browser state, not code)
+.pw-profile/
+
 # next.js build output
 .next/
 out/
