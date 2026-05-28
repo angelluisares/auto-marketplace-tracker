@@ -15,9 +15,11 @@ a local web UI, backed by a shared hosted Postgres.
 - **`lib/`** — `pg.js` (pool + schema), `parse.js` (listing parser + van/junk classifiers),
   `db.js` (web read layer), `searchParse.js` (free-text → query + filters),
   `searchJobs.js` (live search jobs), `searchStore.js` (search history + scheduling),
-  `grid.cjs` (shared metro grid).
+  `metroStore.js` (per-metro enable/disable), `grid.cjs` (the validated metro **catalog**,
+  grouped by time-zone region).
 - **`app/`** — Next.js UI: browse all (`/`), find a vehicle (`/search`), saved & scheduled
-  searches (`/searches`); APIs `/api/listings`, `/api/search`, `/api/searches`.
+  searches (`/searches`), metro on/off (`/metros`); APIs `/api/listings`, `/api/search`,
+  `/api/searches`, `/api/metros`.
 - **`sweep_batches/`** — raw scrape output (gitignored).
 
 > The database is **hosted Postgres (Neon)** so multiple machines share one dataset.
@@ -28,8 +30,10 @@ a local web UI, backed by a shared hosted Postgres.
 - **`listings`** — one row per unique listing (current state): price, `first_price`,
   `first_seen`, `last_seen`, `times_seen`, `is_active`, parsed year/make/model/…, `hash`.
 - **`observations`** — append-only log; one row each time a listing is seen → price history.
-- **`searches`** — saved searches: text, parsed query/filters, run stats, and scheduling
-  (`scheduled`, `interval_minutes`, `next_run_at`).
+- **`searches`** — saved searches: text, parsed query/filters, `region`, run stats, and
+  scheduling (`scheduled`, `interval_minutes`, `next_run_at`).
+- **`metros`** — the metro catalog (`slug`, `region`, `label`, `enabled`); seeded from
+  `grid.cjs`. Searches/scheduled runs scrape only the **enabled** metros in the region.
 
 ## Usage
 
@@ -58,18 +62,28 @@ either the `/marketplace/<city>/vehicles` category or `/marketplace/<city>/searc
 Logged-out caps each page at ~40 results, so coverage comes from sweeping a **grid of
 cities** and unioning results (deduped by ID). No account, no credentials, no extension.
 
+Cities come from a validated **catalog of 66 metros** in `lib/grid.cjs`, grouped into four
+time-zone regions (Eastern 24, Central 21, Mountain 10, Pacific 11). Every slug was
+confirmed to resolve to the intended US city — FB only exposes name slugs for major metros,
+so Mountain/Pacific are smaller (mid-size cities would need FB numeric location IDs). The
+UI search picks a region; the `/metros` page enables/disables individual metros.
+
 ## Web app
 
 - **`/`** — browse / filter / sort all tracked listings.
-- **`/search`** — type free text like `camaro zl1 under 25,000 miles`; it scrapes the metro
-  grid for the keywords, ingests, then shows matches filtered by the parsed limits.
+- **`/search`** — type free text like `camaro zl1 under 25,000 miles` and pick a **region**;
+  it scrapes that region's enabled metros, ingests, then shows matches filtered by the parsed
+  limits.
 - **`/searches`** — every previous search; mark any as scheduled and pick an interval
-  (6h / 12h / daily / …). `scheduler.cjs` re-runs them automatically.
+  (6h / 12h / daily / …). The region is saved per search. `scheduler.cjs` re-runs them.
+- **`/metros`** — turn individual metros on/off per region (persists to the `metros` table).
 
 ## Roadmap
 
 - ✅ Standalone scraper + shared Postgres + web UI
 - ✅ On-demand search + saved/scheduled searches
+- ✅ Time-zone regions + per-metro on/off (66-metro catalog)
+- ⬜ More Mountain/Pacific metros via FB numeric location IDs
 - ⬜ Deploy publicly (multi-user) + auth
 - ⬜ Price-drop / new-match alerts (email/push)
 - ⬜ Smarter ranking & scam/price-sanity filtering

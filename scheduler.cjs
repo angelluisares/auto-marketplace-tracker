@@ -5,8 +5,9 @@
 // stamps the next run from the interval). Keep it running in its own terminal.
 const { spawn } = require('node:child_process');
 const path = require('node:path');
-const { CITIES } = require('./lib/grid.cjs');
+const grid = require('./lib/grid.cjs');
 const store = require('./lib/searchStore.js');
+const metroStore = require('./lib/metroStore.js');
 
 const ROOT = __dirname;
 const TICK_MS = 60 * 1000;
@@ -24,17 +25,18 @@ function spawnNode(args) {
 async function runSearch(row) {
   const log = m => console.log(`[${new Date().toISOString()}] ${m}`);
   const q = row.query;
+  const cities = await metroStore.enabledCitiesFor(row.region);
   if (q) {
     const cat = q.replace(/\s+/g, '_');
-    log(`scraping "${row.text}" (${q}) across ${CITIES.length} metros…`);
-    await spawnNode(['scrape.cjs', '--query', q, ...CITIES]);
-    for (const city of CITIES) {
+    log(`scraping "${row.text}" (${q}) [${row.region || 'all'}] across ${cities.length} metros…`);
+    await spawnNode(['scrape.cjs', '--query', q, ...cities]);
+    for (const city of cities) {
       await spawnNode(['marketplace_tracker.cjs', 'ingest', path.join('sweep_batches', `${city}_${cat}.json`)]);
     }
   }
   const parsed = store.rowToParsed(row);
   const matches = await store.matchListings(parsed);
-  await store.recordRun(parsed, matches.length); // updates last_run_at, last_found, next_run_at
+  await store.recordRun(parsed, matches.length, row.region); // updates last_run_at, last_found, next_run_at
   log(`done "${row.text}" -> ${matches.length} matches`);
 }
 
@@ -56,6 +58,6 @@ async function tick() {
   }
 }
 
-console.log(`[${new Date().toISOString()}] scheduler started — checking every ${TICK_MS / 1000}s. Cities: ${CITIES.length}`);
+console.log(`[${new Date().toISOString()}] scheduler started — checking every ${TICK_MS / 1000}s. Metros available: ${grid.ALL.length}`);
 tick();
 setInterval(tick, TICK_MS);

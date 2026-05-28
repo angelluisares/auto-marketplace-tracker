@@ -95,7 +95,10 @@ export default function SearchesPage() {
                     <tr key={s.id} className={s.scheduled ? 'sched' : ''}>
                       <td>
                         <div className="q">{s.query || s.text}</div>
-                        <div className="chiprow">{chips(s).map((c, i) => <span key={i} className="chip">{c}</span>)}</div>
+                        <div className="chiprow">
+                          {s.region && <span className="chip region">{s.region === 'all' ? 'All US' : s.region}</span>}
+                          {chips(s).map((c, i) => <span key={i} className="chip">{c}</span>)}
+                        </div>
                       </td>
                       <td>{ago(s.last_run_at)}</td>
                       <td className="num">{s.last_found ?? '—'}</td>
@@ -108,7 +111,7 @@ export default function SearchesPage() {
                       <td>{s.scheduled ? ago(s.next_run_at) : '—'}</td>
                       <td className="actions">
                         <button onClick={() => view(s.id)}>{expanded === s.id ? 'Hide' : 'View'}</button>
-                        <a href={'/search?q=' + encodeURIComponent(s.text)}>Run now</a>
+                        <a href={'/search?q=' + encodeURIComponent(s.text) + (s.region ? '&region=' + s.region : '')}>Run now</a>
                         <button className="del" onClick={() => del(s.id)}>Delete</button>
                       </td>
                     </tr>
@@ -168,6 +171,7 @@ export default function SearchesPage() {
         .q { font-weight: 600; }
         .chiprow { margin-top: 3px; display: flex; gap: 4px; flex-wrap: wrap; }
         .chip { background: #e7eef6; border: 1px solid #cdddec; border-radius: 999px; padding: 1px 8px; font-size: 11px; }
+        .chip.region { background: #eaf3ea; border-color: #cfe3cf; color: #2c6e2c; text-transform: capitalize; }
         select { padding: 5px 6px; border: 1px solid #ccc; border-radius: 6px; font-size: 12px; }
         .actions { white-space: nowrap; }
         .actions button, .actions a { margin-right: 8px; font-size: 12px; cursor: pointer; background: none; border: 0; color: #0563c1; padding: 0; text-decoration: none; }

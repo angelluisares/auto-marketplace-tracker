@@ -49,9 +49,11 @@ user **search for a specific vehicle on demand**. Scope is **ALL vehicles** (ren
 4. ✅ **Standalone Playwright scraper** (no browser extension; scriptable & schedulable)
 5. ✅ **On-demand search UI** (free-text → scrape → filtered matches)
 6. ✅ **Saved & scheduled searches** (re-run on an interval via a worker)
-7. ⬜ Deploy publicly (multi-user) + auth
-8. ⬜ Price-drop / new-match alerts
-9. ⬜ (Later) migrate Neon → self-hosted Postgres
+7. ✅ **Time-zone regions + per-metro on/off** (66-metro catalog, `/metros` page)
+8. ⬜ More Mountain/Pacific metros via FB numeric location IDs
+9. ⬜ Deploy publicly (multi-user) + auth
+10. ⬜ Price-drop / new-match alerts
+11. ⬜ (Later) migrate Neon → self-hosted Postgres
 
 ---
 
@@ -73,10 +75,13 @@ web app connect to the same DB over the network.
   content `hash`, parsed `year/make/model/trim/roof/wheelbase/drivetrain/mileage_num/
   city/state`, `raw_text`.
 - **`observations`** — append-only; one row every time a listing is seen → price history.
-- **`searches`** — saved searches (added this session). Columns: `text` (unique, the raw
-  query string), parsed `query/max_miles/max_price/min_year/max_year`, `run_count`,
-  `last_run_at`, `last_found`, and scheduling `scheduled`/`interval_minutes`/`next_run_at`.
-  Created lazily by `lib/searchStore.js`.
+- **`searches`** — saved searches. Columns: `text` (unique, the raw query string), parsed
+  `query/max_miles/max_price/min_year/max_year`, `region`, `run_count`, `last_run_at`,
+  `last_found`, and scheduling `scheduled`/`interval_minutes`/`next_run_at`. Created lazily
+  by `lib/searchStore.js`.
+- **`metros`** — the metro catalog: `slug` (PK), `region`, `label`, `enabled`. Seeded from
+  `lib/grid.cjs` by `lib/metroStore.js`. Searches/scheduled runs scrape only the **enabled**
+  metros in the chosen region. The `/metros` page toggles these.
 
 ---
 
@@ -125,9 +130,22 @@ It worked but **does not scale and cannot be scheduled**:
   ambiguous names. (Birmingham AL is still TODO for this reason.)
 - **FB search is loose.** `/search?query=…` returns the matches *plus* padding (other
   vehicles) up to ~40. That's fine: we ingest everything and filter precisely in the DB.
-- The verified-good metro grid lives in **`lib/grid.cjs`** (shared by the live search and the
-  scheduler): atlanta, charlotte, nashville, raleigh, charleston, greenville, knoxville,
-  augusta, dallas, houston, miami, orlando.
+- **The login modal can lock scrolling.** `dismissModal()` in `scrape.cjs` presses Escape,
+  clicks the close control, and — if the login wall persists — removes the dialog from the
+  DOM and restores `body` scroll, so pages load more fully.
+
+### The metro catalog & regions (`lib/grid.cjs`)
+- `lib/grid.cjs` is the **validated catalog of 66 metros**, each `{slug, region, label}`,
+  grouped into 4 time-zone regions: **Eastern 24, Central 21, Mountain 10, Pacific 11**.
+- Every slug was confirmed to resolve to the intended US city by loading its `/vehicles`
+  page and reading the title. **FB only exposes name slugs for major metros** — mid-size
+  cities (Sacramento, Long Beach, Boulder, OKC, Tacoma…) return a generic page and were
+  dropped. That's why Mountain/Pacific are smaller; pushing them to ~20 needs FB **numeric
+  location IDs** (stage 8). Some big metros need non-obvious slugs (`nyc`, `philly`, `dc`,
+  `la`, `vegas`). **Re-validate any new slug before adding it.**
+- `lib/metroStore.js` (`metros` table) holds the **enabled** subset; `enabledCitiesFor(region)`
+  is what the search/scheduler actually scrape. To add metros, extend `CATALOG` in `grid.cjs`
+  (it re-seeds `metros` on next use, preserving existing `enabled` flags).
 
 ---
 
@@ -141,24 +159,30 @@ The headline feature: a user types free text and gets matches, and can save/sche
    become filters applied to our own parsed data (`mileage_num`/`price_num`/`year`) — we do
    NOT drive Facebook's filter UI (fragile). Example: `camaro zl1 under 25,000 miles` →
    query `camaro zl1`, maxMiles 25000.
-2. **Job** (`lib/searchJobs.js`): spawns `scrape.cjs --query <q>` across the grid (tracking
-   progress), ingests each batch, then queries the DB for matches (drops parts/junk under
-   $800, sorts by mileage). In-memory jobs; status `scraping → ingesting → searching → done`.
+2. **Job** (`lib/searchJobs.js`): takes the text + a **region**, resolves it to that region's
+   **enabled** metros (`metroStore.enabledCitiesFor`), spawns `scrape.cjs --query <q>` across
+   them (tracking progress), ingests each batch, then queries the DB for matches (drops
+   parts/junk under $800, sorts by mileage). In-memory jobs; status
+   `scraping → ingesting → searching → done`. `createAndRun` is async (it awaits the metro set).
 3. **Persist** (`lib/searchStore.js`): every completed run is upserted into `searches`
-   (run count, last found, etc.) and exposes list/schedule/results/due helpers.
+   (region, run count, last found, etc.) and exposes list/schedule/results/due helpers.
 
 ### APIs
-- `POST /api/search {text}` → start a job; `GET /api/search?id=` → poll status + results.
-- `GET /api/searches` → list saved searches; `GET /api/searches?results=ID` → current matches
-  (instant, no scrape); `PATCH /api/searches {id, scheduled, intervalMinutes}`;
-  `DELETE /api/searches?id=`.
+- `POST /api/search {text, region}` → start a job; `GET /api/search?id=` → poll status + results.
+- `GET /api/searches` → list; `GET /api/searches?results=ID` → current matches (no scrape);
+  `PATCH /api/searches {id, scheduled, intervalMinutes}`; `DELETE /api/searches?id=`.
+- `GET /api/metros` → catalog grouped by region; `PATCH /api/metros {slug,enabled}` (one) or
+  `{region,enabled}` (bulk, `region:'all'` = everything).
 
 ### Pages
-- **`/search`** — single free-text box, shows how it parsed your text, a live progress bar
-  while scraping the grid, then the results table. Auto-runs when opened as `/search?q=…`.
-- **`/searches`** — every previous search; a per-row dropdown sets the schedule
-  (Not scheduled / 6h / 12h / Daily / 3 days / Weekly), shows next-run, View (inline current
-  matches), Run now, Delete.
+- **`/search`** — free-text box + **region dropdown** (Eastern/Central/Mountain/Pacific/All US),
+  shows how it parsed your text, a live progress bar, then the results table. Auto-runs when
+  opened as `/search?q=…&region=…`.
+- **`/searches`** — every previous search (with its region badge); a per-row dropdown sets the
+  schedule (Not scheduled / 6h / 12h / Daily / 3 days / Weekly), shows next-run, View (inline
+  current matches), Run now, Delete.
+- **`/metros`** — turn individual metros on/off per region (bulk on/off too); persists to the
+  `metros` table; the scraper/scheduler honor it.
 
 ### Scheduler worker — `scheduler.cjs`
 - Run it in its own terminal: `node scheduler.cjs`. Every 60s it finds scheduled searches
@@ -181,19 +205,22 @@ auto-marketplace-tracker/
 │   ├── pg.js                 # shared Postgres pool + schema (CJS)
 │   ├── parse.js              # listing text parser + isVan/isJunk (ESM)
 │   ├── db.js                 # web read layer: queryListings / facets / priceHistory (ESM)
-│   ├── grid.cjs              # shared metro grid (CJS)
+│   ├── grid.cjs              # CATALOG of 66 validated metros {slug,region,label} (CJS)
+│   ├── metroStore.js         # `metros` table: per-metro enable/disable (CJS)
 │   ├── searchParse.js        # free-text -> {query, maxMiles, maxPrice, year} (CJS)
 │   ├── searchJobs.js         # live search jobs: scrape -> ingest -> match (ESM)
 │   └── searchStore.js        # `searches` table: history + scheduling (CJS)
 ├── app/
 │   ├── page.js               # browse all listings
-│   ├── search/page.js        # on-demand search box
+│   ├── search/page.js        # on-demand search box + region dropdown
 │   ├── searches/page.js      # saved & scheduled searches
+│   ├── metros/page.js        # per-metro on/off by region
 │   ├── layout.js
 │   └── api/
 │       ├── listings/route.js # GET /api/listings
 │       ├── search/route.js   # POST/GET /api/search (live job)
-│       └── searches/route.js # GET/PATCH/DELETE /api/searches (history + scheduling)
+│       ├── searches/route.js # GET/PATCH/DELETE /api/searches (history + scheduling)
+│       └── metros/route.js   # GET/PATCH /api/metros (catalog + toggles)
 ├── next.config.mjs           # serverExternalPackages: ['pg','better-sqlite3']
 ├── .env.example              # template; copy to .env.local with real DATABASE_URL
 ├── README.md / HANDOFF.md
@@ -202,8 +229,9 @@ auto-marketplace-tracker/
 ```
 
 Module style note: files consumed by Next (`app/`, `lib/*.js`) use ESM; CJS helpers
-(`*.cjs`, `lib/searchStore.js`) are required by both the scheduler (CJS) and the Next API
-(ESM, via default import) — mirror the existing `import pg from './pg.js'` pattern.
+(`*.cjs`, `lib/searchStore.js`, `lib/metroStore.js`) are required by both the scheduler (CJS)
+and the Next API (ESM, via default import) — mirror the existing `import pg from './pg.js'`
+pattern.
 
 ### Ingest behavior (unchanged, keep it)
 - **Dedup by `id`** (UPSERT). **Change detection** via content `hash`; **price drops** when
@@ -220,16 +248,24 @@ Module style note: files consumed by Next (`app/`, `lib/*.js`) use ESM; CJS help
 - ✅ Standalone `scrape.cjs` is the working scraper. Validated across many metros.
 - ✅ On-demand search (`/search`), saved/scheduled searches (`/searches`), and `scheduler.cjs`
   are built and tested (parse, scrape→ingest→match, schedule persist, due-detection).
+- ✅ **Time-zone regions + per-metro on/off**: 66-metro catalog (`grid.cjs`), `metros` table
+  (`metroStore.js`), `/metros` toggle page, region dropdown on `/search`; region saved per
+  search and honored by the scheduler. Verified toggles change the scraped set.
 - ⚠️ Fresh clone has **code but no local data** — data lives in the shared Postgres (reach it
   via `.env.local`). `listings.db`, `sweep_batches/`, `*.xlsx`, `.pw-profile/`, `.env*` are
   gitignored.
 
 ### Next steps
-1. **Birmingham, AL** — find the correct FB location (bare slug → UK) and add it to the grid.
+1. **More Mountain/Pacific metros via FB numeric location IDs.** Name-slugs only cover major
+   metros (Mountain 10, Pacific 11). To reach ~20 there, discover the numeric `location_id`
+   for mid-size cities and use `/marketplace/<id>/...`. (Same fix unblocks **Birmingham, AL**,
+   whose bare slug → UK.)
 2. **Smarter result filtering** — the $800 floor still lets obvious scam/bait listings through
    (e.g. a "$1,000" ZL1). Flag prices far below the median for a given search.
 3. **Alerts** — on a scheduled run, diff new matches / price drops and notify (email/push).
 4. **Deploy** the Next app + run `scheduler.cjs` as a hosted worker; add auth (multi-user).
+5. **Make the scheduler durable** — currently a manually-launched process; register it as a
+   Windows scheduled task (or host it) so it survives reboots.
 
 ---
 

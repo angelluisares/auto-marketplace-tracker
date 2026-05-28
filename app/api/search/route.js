@@ -9,7 +9,7 @@ export async function POST(req) {
   try { body = await req.json(); } catch {}
   const text = (body.text || '').trim();
   if (!text) return NextResponse.json({ error: 'Type what you are looking for.' }, { status: 400 });
-  const job = createAndRun(text);
+  const job = await createAndRun(text, body.region);
   return NextResponse.json(job);
 }
 

@@ -26,13 +26,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function dismissModal(page) {
   try {
-    const dialog = await page.$('[role="dialog"]');
-    if (dialog) {
-      const close = await dialog.$('[aria-label="Close"]');
-      if (close) await close.click({ timeout: 1000 }).catch(() => {});
-    }
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.evaluate(() => {
+      // 1) click any "Close" control inside a dialog
+      document.querySelectorAll('[role="dialog"] [aria-label]').forEach(el => {
+        if ((el.getAttribute('aria-label') || '').toLowerCase().includes('close')) {
+          try { el.click(); } catch {}
+        }
+      });
+      // 2) if it's the login/"See more on Facebook" wall, remove it outright
+      document.querySelectorAll('[role="dialog"]').forEach(d => {
+        const t = (d.innerText || '').toLowerCase();
+        if (t.includes('see more on facebook') || t.includes('log in') || t.includes('create new account')) {
+          try { d.remove(); } catch {}
+        }
+      });
+      // 3) FB locks page scroll while the modal is up — restore it
+      document.documentElement.style.overflow = '';
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      // 4) drop a leftover fixed full-screen backdrop (mostly-empty top-layer div)
+      document.querySelectorAll('body > div').forEach(el => {
+        const s = getComputedStyle(el);
+        if (s.position === 'fixed' && parseInt(s.zIndex || '0', 10) >= 100 &&
+            el.getBoundingClientRect().height > window.innerHeight * 0.9 &&
+            !el.querySelector('a[href*="/marketplace/item/"]')) {
+          try { el.remove(); } catch {}
+        }
+      });
+    }).catch(() => {});
   } catch {}
-  await page.keyboard.press('Escape').catch(() => {});
 }
 
 async function scrapeCity(page, city) {

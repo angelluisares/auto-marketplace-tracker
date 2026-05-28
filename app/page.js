@@ -50,6 +50,7 @@ export default function Page() {
         </span>
         <a className="findlink" href="/search">🔎 Find a vehicle…</a>
         <a className="savedlink" href="/searches">Saved searches</a>
+        <a className="savedlink" href="/metros">Metros</a>
       </header>
 
       <div className="filters">

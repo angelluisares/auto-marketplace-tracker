@@ -9,11 +9,20 @@ const STATUS_LABEL = {
   error: 'Error',
 };
 
+const REGION_OPTS = [
+  { v: 'all', label: 'All US (up to 66 metros · very slow)' },
+  { v: 'eastern', label: 'Eastern (up to 24)' },
+  { v: 'central', label: 'Central (up to 21)' },
+  { v: 'mountain', label: 'Mountain (up to 10)' },
+  { v: 'pacific', label: 'Pacific (up to 11)' },
+];
+
 function fmtMoney(v) { return v != null ? '$' + v.toLocaleString() : ''; }
 function fmtNum(v) { return v != null ? v.toLocaleString() : ''; }
 
 export default function SearchPage() {
   const [text, setText] = useState('');
+  const [region, setRegion] = useState('eastern');
   const [job, setJob] = useState(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef(null);
@@ -21,10 +30,12 @@ export default function SearchPage() {
 
   useEffect(() => () => clearInterval(timer.current), []);
 
-  const start = useCallback(async (override) => {
+  const start = useCallback(async (override, regionOverride) => {
     const q = (typeof override === 'string' ? override : text).trim();
+    const reg = (typeof regionOverride === 'string' && regionOverride) ? regionOverride : region;
     if (!q || busy) return;
     setText(q);
+    if (regionOverride) setRegion(reg);
     setBusy(true);
     setJob({ status: 'scraping', citiesDone: 0, citiesTotal: 0, parsed: null });
     clearInterval(timer.current);
@@ -32,7 +43,7 @@ export default function SearchPage() {
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: q }),
+        body: JSON.stringify({ text: q, region: reg }),
       });
       const j = await res.json();
       if (!res.ok) { setJob({ status: 'error', error: j.error || 'failed to start' }); setBusy(false); return; }
@@ -47,15 +58,16 @@ export default function SearchPage() {
       setJob({ status: 'error', error: String(e.message || e) });
       setBusy(false);
     }
-  }, [text, busy]);
+  }, [text, region, busy]);
 
   const onKey = e => { if (e.key === 'Enter') start(); };
 
-  // Auto-run when arriving via /search?q=... (e.g. "Run now" from Saved Searches)
+  // Auto-run when arriving via /search?q=...&region=... (e.g. "Run now" from Saved Searches)
   useEffect(() => {
     if (auto.current) return;
-    const q = new URLSearchParams(window.location.search).get('q');
-    if (q) { auto.current = true; start(q); }
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q');
+    if (q) { auto.current = true; start(q, params.get('region') || undefined); }
   }, [start]);
 
   const p = job?.parsed;
@@ -67,6 +79,7 @@ export default function SearchPage() {
       <header>
         <h1>Find a Vehicle</h1>
         <a className="back" href="/searches">saved searches →</a>
+        <a className="back" href="/metros">metros →</a>
         <a className="back" href="/">browse all →</a>
       </header>
 
@@ -79,13 +92,17 @@ export default function SearchPage() {
           onKeyDown={onKey}
           disabled={busy}
         />
+        <select value={region} onChange={e => setRegion(e.target.value)} disabled={busy} title="Region to scrape">
+          {REGION_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+        </select>
         <button onClick={start} disabled={busy || !text.trim()}>
           {busy ? 'Searching…' : 'Search'}
         </button>
       </div>
       <div className="hint">
-        Type a model and (optionally) limits like “under 25,000 miles” or “under $70k”. I’ll search Facebook Marketplace
-        across {job?.citiesTotal || 12} metros, then show the matches — this takes a few minutes.
+        Type a model and (optionally) limits like “under 25,000 miles” or “under $70k”, then pick a region.
+        I’ll search Facebook Marketplace across that region’s metros and show the matches. Bigger regions take longer
+        (All US ≈ 25 min).
       </div>
 
       {p && (
@@ -155,6 +172,7 @@ export default function SearchPage() {
         .back { color: #0563c1; font-size: 13px; text-decoration: none; }
         .searchbar { display: flex; gap: 8px; }
         .searchbar input { flex: 1; padding: 12px 14px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+        .searchbar select { padding: 0 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 13px; background: #fff; max-width: 230px; }
         .searchbar button { padding: 12px 22px; border: 0; border-radius: 8px; background: #1f4e78; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer; }
         .searchbar button:disabled { background: #9bb3c9; cursor: default; }
         .hint { color: #666; font-size: 12.5px; margin: 8px 2px 0; }
