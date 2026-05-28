@@ -104,7 +104,7 @@ export default function SearchesPage() {
                       <td>
                         <div className="q">{s.query || s.text}</div>
                         <div className="chiprow">
-                          {s.region && <span className="chip region">{s.region === 'all' ? 'All US' : s.region}</span>}
+                          <span className="chip region">{!s.region || s.region === 'all' ? 'All US' : s.region}</span>
                           {chips(s).map((c, i) => <span key={i} className="chip">{c}</span>)}
                         </div>
                       </td>
