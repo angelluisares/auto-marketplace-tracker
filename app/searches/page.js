@@ -3,6 +3,10 @@ import { useState, useEffect, useCallback } from 'react';
 
 const INTERVALS = [
   { v: 0, label: 'Not scheduled' },
+  { v: 15, label: 'Every 15 minutes' },
+  { v: 30, label: 'Every 30 minutes' },
+  { v: 60, label: 'Hourly' },
+  { v: 120, label: 'Every 2 hours' },
   { v: 360, label: 'Every 6 hours' },
   { v: 720, label: 'Every 12 hours' },
   { v: 1440, label: 'Daily' },
@@ -160,6 +164,8 @@ export default function SearchesPage() {
       <p className="note">
         Scheduled searches re-run automatically when the <code>scheduler.cjs</code> worker is running
         (<code>node scheduler.cjs</code>). Each run re-scrapes the metro grid and updates matches &amp; price history.
+        Tip: a full <em>All US</em> scrape takes several minutes, so short intervals (15–30 min) are best for
+        narrower regions; the worker checks for due searches once a minute.
       </p>
 
       <style jsx global>{`
