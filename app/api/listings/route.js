@@ -10,6 +10,7 @@ export async function GET(req) {
     const rows = await queryListings({
       q: sp.get('q') || undefined,
       make: sp.get('make') || undefined,
+      model: sp.get('model') || undefined,
       state: sp.get('state') || undefined,
       hideJunk: bool('hideJunk'),
       activeOnly: bool('activeOnly'),

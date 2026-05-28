@@ -19,8 +19,9 @@ const COLS = [
 export default function Page() {
   const [data, setData] = useState({ rows: [], count: 0, facets: { makes: [], states: [], total: {} } });
   const [loading, setLoading] = useState(true);
+  const [models, setModels] = useState([]);
   const [f, setF] = useState({
-    q: '', make: '', state: '', hideJunk: true, activeOnly: false,
+    q: '', make: '', model: '', state: '', hideJunk: true, activeOnly: false,
     minPrice: '', maxPrice: '', maxMileage: '', sort: 'last_seen', dir: 'desc',
   });
 
@@ -38,7 +39,20 @@ export default function Page() {
 
   useEffect(() => { load(); }, [load]);
 
+  // When the selected make changes, fetch its models for the dependent dropdown.
+  useEffect(() => {
+    if (!f.make) { setModels([]); return; }
+    let cancelled = false;
+    fetch('/api/models?make=' + encodeURIComponent(f.make))
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setModels(j.models || []); })
+      .catch(() => { if (!cancelled) setModels([]); });
+    return () => { cancelled = true; };
+  }, [f.make]);
+
   const set = (k, v) => setF(s => ({ ...s, [k]: v }));
+  // Changing make resets the model selection (the old model may not exist under the new make).
+  const setMake = (v) => setF(s => ({ ...s, make: v, model: '' }));
   const sortBy = (key) => setF(s => ({ ...s, sort: key, dir: s.sort === key && s.dir === 'desc' ? 'asc' : 'desc' }));
 
   return (
@@ -55,10 +69,16 @@ export default function Page() {
 
       <div className="filters">
         <input placeholder="Search title…" value={f.q} onChange={e => set('q', e.target.value)} />
-        <select value={f.make} onChange={e => set('make', e.target.value)}>
+        <select value={f.make} onChange={e => setMake(e.target.value)}>
           <option value="">All makes</option>
           {data.facets.makes.map(m => <option key={m.make} value={m.make}>{m.make} ({m.n})</option>)}
         </select>
+        {f.make && (
+          <select value={f.model} onChange={e => set('model', e.target.value)}>
+            <option value="">All {f.make} models</option>
+            {models.map(m => <option key={m.model} value={m.model}>{m.model} ({m.n})</option>)}
+          </select>
+        )}
         <select value={f.state} onChange={e => set('state', e.target.value)}>
           <option value="">All states</option>
           {data.facets.states.map(s => <option key={s.state} value={s.state}>{s.state} ({s.n})</option>)}
