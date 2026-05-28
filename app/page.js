@@ -20,7 +20,7 @@ export default function Page() {
   const [data, setData] = useState({ rows: [], count: 0, facets: { makes: [], states: [], total: {} } });
   const [loading, setLoading] = useState(true);
   const [f, setF] = useState({
-    q: '', make: '', state: '', vansOnly: false, hideJunk: true, activeOnly: false,
+    q: '', make: '', state: '', hideJunk: true, activeOnly: false,
     minPrice: '', maxPrice: '', maxMileage: '', sort: 'last_seen', dir: 'desc',
   });
 
@@ -66,7 +66,6 @@ export default function Page() {
         <input type="number" placeholder="Min $" value={f.minPrice} onChange={e => set('minPrice', e.target.value)} style={{ width: 80 }} />
         <input type="number" placeholder="Max $" value={f.maxPrice} onChange={e => set('maxPrice', e.target.value)} style={{ width: 90 }} />
         <input type="number" placeholder="Max miles" value={f.maxMileage} onChange={e => set('maxMileage', e.target.value)} style={{ width: 100 }} />
-        <label><input type="checkbox" checked={f.vansOnly} onChange={e => set('vansOnly', e.target.checked)} /> Vans only</label>
         <label><input type="checkbox" checked={f.hideJunk} onChange={e => set('hideJunk', e.target.checked)} /> Hide junk</label>
         <label><input type="checkbox" checked={f.activeOnly} onChange={e => set('activeOnly', e.target.checked)} /> Active only</label>
       </div>

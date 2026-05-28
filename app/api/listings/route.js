@@ -11,7 +11,6 @@ export async function GET(req) {
       q: sp.get('q') || undefined,
       make: sp.get('make') || undefined,
       state: sp.get('state') || undefined,
-      vansOnly: bool('vansOnly'),
       hideJunk: bool('hideJunk'),
       activeOnly: bool('activeOnly'),
       minPrice: sp.get('minPrice') || undefined,
