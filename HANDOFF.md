@@ -1,158 +1,185 @@
 # Project Handoff — Auto Marketplace Tracker
 
-This document is written to hand the project off to a **Claude Code session on another machine**. Read it fully before doing any work. It explains the goal, the architecture, the **preferred scraping method** (this is the most important part), the current state, and the next steps.
+This document hands the project off to a **Claude Code session on another machine**. Read it fully before doing any work. It explains the goal, the architecture, the **preferred scraping method**, how to **connect to the shared hosted database**, the current state, and exactly where to pick up.
 
 ---
 
-## 1. What we are trying to build
+## 0. QUICK START (do this first on the new machine)
 
-A tool that **tracks used-vehicle listings from Facebook Marketplace over time** so the user can browse, sort, and filter them — and see how listings change (price drops, how long they've been listed, when they disappear).
+```bash
+git clone https://github.com/angelluisares/auto-marketplace-tracker.git
+cd auto-marketplace-tracker
+npm install
 
-Originally this was scoped to Mercedes Sprinter vans, but **the scope is now ALL vehicles** (that's why the project was renamed from `sprinter-tracker` to `auto-marketplace-tracker`). The van/junk classifiers still exist but are now optional filters, not the focus.
+# Connect to the SHARED hosted database (see §2):
+cp .env.example .env.local
+#   then edit .env.local and paste the real Neon DATABASE_URL
+#   (get it from Angel / the Neon dashboard — it is NOT in the repo)
 
-### End goal
-A **multi-user web app on a public URL** where people can view/filter/organize the tracked listings. We are building toward that in stages:
+# Verify you can reach the shared DB and see the data:
+node -e "require('dotenv').config({path:'.env.local'});const{Pool}=require('pg');new Pool({connectionString:process.env.DATABASE_URL,ssl:{rejectUnauthorized:false}}).query('SELECT count(*) FROM listings').then(r=>{console.log('listings in shared DB:',r.rows[0].count);process.exit(0)}).catch(e=>{console.error(e.message);process.exit(1)})"
 
-1. ✅ Scrape pipeline → local SQLite + xlsx export
-2. ✅ Local web front end (Next.js) reading the SQLite DB
-3. ⬜ Finish full scrape coverage
-4. ⬜ Migrate SQLite → hosted Postgres + deploy the web app (multi-user)
-5. ⬜ Scheduled re-scrapes a few times/day + price-drop alerts
+# Run the web UI against the shared DB:
+npm run dev          # http://localhost:3000
+```
 
-SQLite → Postgres is a clean migration (same schema, minor SQL dialect tweaks), so nothing built on SQLite is wasted.
+If the count prints (should be ~286+), you're connected to the same database as the other machine.
 
 ---
 
-## 2. THE PREFERRED SCRAPING METHOD (read this carefully)
+## 1. What we are building
+
+A tool that **tracks used-vehicle listings from Facebook Marketplace over time** — browse/sort/filter them and see how they change (price drops, days listed, when they disappear). Scope is **ALL vehicles** (renamed from `sprinter-tracker` → `auto-marketplace-tracker`; van/junk classifiers are now optional filters, not the focus).
+
+**End goal:** a multi-user web app on a public URL. Stages:
+1. ✅ Scrape pipeline → DB
+2. ✅ Local web front end (Next.js)
+3. ✅ **Shared hosted Postgres (Neon)** so multiple machines write to ONE dataset ← we are here
+4. ⬜ Finish full scrape coverage + broaden beyond vans
+5. ⬜ Deploy the web app publicly (multi-user), add auth
+6. ⬜ Scheduled re-scrapes + price-drop alerts
+7. ⬜ (Later) migrate Neon → coworker's self-hosted Postgres — see §7
+
+---
+
+## 2. The shared database (Neon Postgres) — how to connect
+
+**The database is now hosted Postgres on Neon, NOT a local SQLite file.** This is what lets multiple machines scrape into one shared dataset. Both machines (and the web app) connect to the same DB over the network.
+
+- The connection string lives ONLY in **`.env.local`** (gitignored). It is **NOT in the repo** because the repo is public. Get the real `DATABASE_URL` from Angel or the Neon dashboard and put it in `.env.local` (copy `.env.example` as the template).
+- `lib/pg.js` is the shared connection pool + schema (standard Postgres, SSL required). Both the CLI scripts and the Next.js app use it.
+- The schema is **vendor-neutral standard Postgres** (no Neon-only features) so it can be `pg_dump`'d to any server later (§7).
+- **SECURITY:** never commit `.env.local` or paste the connection string into any tracked file. The `.gitignore` already excludes `.env*` files. If a credential leaks, rotate the Neon role password in the dashboard.
+
+---
+
+## 3. THE PREFERRED SCRAPING METHOD (read carefully)
 
 **Use the LOGGED-OUT Marketplace, and get geographic coverage by SUBSTITUTING CITY SLUGS in the URL. This is the preferred method. Do not log in.**
 
 ### Why logged-out + city substitution is preferred
-- **No account, no credentials, no login.** Avoids the account-flagging/ban risk that comes with heavy automated scraping on a logged-in Facebook account. This makes the tool sustainable and safe to run repeatedly, and appropriate for a public/shared app.
-- Marketplace **search pages and individual listing pages are publicly viewable without an account.** A login modal pops up but is dismissable (it is NOT an auth wall — the listing data is in the page behind it).
+- No account, no credentials, no login → avoids account-flagging/ban risk from heavy automated scraping. Sustainable and safe to run repeatedly; appropriate for a public app.
+- Marketplace search + listing pages are publicly viewable. A login modal pops up but is **dismissable** (it's NOT an auth wall — data is in the page behind it).
 
 ### How it works
-The URL pattern is:
+URL pattern:
 ```
 https://www.facebook.com/marketplace/<CITY_SLUG>/search?query=<QUERY>
 ```
-- `<CITY_SLUG>` controls location, e.g. `greenville`, `charlotte`, `atlanta`, `knoxville`, `nashville`, `augusta`, `raleigh`, `charleston`, `birmingham`, `huntsville`.
-- `<QUERY>` is the search term, e.g. `mercedes sprinter`, `cargo van`, etc.
+- `<CITY_SLUG>` controls location: `greenville`, `charlotte`, `atlanta`, `knoxville`, `nashville`, `augusta`, `raleigh`, `charleston`, `birmingham`, `huntsville`, …
+- `<QUERY>` is the search term: `mercedes sprinter`, `cargo van`, etc.
 
-### The key constraints and the strategy that beats them
-- **Logged-out caps each search at ~40 results** (no infinite scroll — the feed stops). You CANNOT get hundreds from one search logged-out.
-- **Logged-out cannot set a radius** (defaults to ~40 mi around the city) and **cannot use the account's saved location**.
-- **THE STRATEGY:** run **many small searches across a GRID of city slugs × queries**, then **union all results and dedup by listing ID**. ~10 cities × 2–3 queries × ~40 each → a few hundred **unique** listings covering a wide region. Adjacent cities overlap (~15–20%), which is fine — dedup handles it, and re-seeing a listing just confirms it's still live.
+### Constraints + the strategy that beats them
+- **Logged-out caps each search at ~40 results** (no infinite scroll). You cannot get hundreds from one search.
+- **No radius control logged-out** (~40 mi default around the city); cannot use a saved account location.
+- **STRATEGY:** run **many small searches across a GRID of city slugs × queries**, then **union and dedup by listing ID**. ~10 cities × 2–3 queries × ~40 each → a few hundred unique listings over a wide region. Adjacent-city overlap (~15–20%) is fine — dedup handles it.
 
-### What logged-IN gives you (and why we still don't use it)
-Logged-in allows one big 500-mi-radius scrape (~600 results in a single pass) with infinite scroll. It's fewer requests per run, BUT it requires a Facebook account and carries flagging risk. **We deliberately chose logged-out** for safety/sustainability. Only revisit logged-in if logged-out coverage proves insufficient.
+### Logged-in (why we DON'T use it)
+Logged-in allows one ~600-result 500-mi scrape, but requires an account and carries flagging risk. We deliberately chose logged-out. Only revisit if logged-out coverage proves insufficient.
 
 ### Bonus: listed date
-Individual listing **detail pages** (logged-out) expose a relative **"Listed X ago"** string (e.g. "Listed 5 weeks ago"). The pipeline can resolve that to an approximate date (`listed_date`). It's optional enrichment (extra page visits); when absent, our own `first_seen` timestamp is the backup.
+Logged-out **detail pages** expose "Listed X ago"; the pipeline resolves it to an approx `listed_date`. Optional enrichment; when absent, our own `first_seen` is the backup.
 
 ---
 
-## 3. How the scrape is actually executed (mechanics + gotchas)
+## 4. How a scrape is executed (mechanics + gotchas)
 
-Scraping is driven by **Claude operating a Chrome browser** via the Claude-in-Chrome extension tools. It is NOT a standalone headless script — Facebook blocks headless/scripted access, so it must run through a real browser Claude drives.
+Scraping is driven by **Claude operating a Chrome browser** via the Claude-in-Chrome extension (FB blocks headless/scripted access, so it must run through a real browser Claude drives).
 
 ### Per-search procedure
 1. `navigate` the controlled tab to the city/query search URL.
-2. Run a JS snippet that: dismisses the login modal (find `[role="dialog"]` → click the close button by `aria-label`), then **scrolls to the bottom repeatedly** (`window.scrollTo(0, document.documentElement.scrollHeight)` with ~1.5s waits) until the count stops growing (the ~40 cap).
-3. Collect each card: from every `a[href*="/marketplace/item/"]`, extract the listing **ID** from the URL and the card's `innerText` (price, year/make/model/trim, city/state, mileage).
+2. JS snippet: dismiss the login modal (find `[role="dialog"]` → click close by `aria-label`), then **scroll to the bottom repeatedly** (`window.scrollTo(0, document.documentElement.scrollHeight)` with ~1.5s waits) until the count stops growing (~40 cap).
+3. From every `a[href*="/marketplace/item/"]`: extract the listing **ID** from the URL + the card's `innerText`.
 4. Output `{ source, records: [{id, text}] }`.
 
-### CRITICAL GOTCHA — getting data from the browser to disk
-Several transfer channels are blocked by browser security; here is what works:
-- ❌ **Downloads with the Save-As prompt ON** → blocks on a dialog. (User can disable: Chrome Settings → Downloads → turn OFF "Ask where to save each file before downloading.")
-- ❌ **Page → localhost POST** → blocked by Chrome Private Network Access.
-- ❌ **Large eval return values** → the tool result view truncates ~1KB, so you can't capture big payloads directly.
-- ✅ **THE METHOD THAT WORKS:** trigger a Blob download from the page (use a **`.txt`** download name, type `text/plain`). Chrome writes the FULL data to a randomly-named **`.tmp`** file in the Downloads folder (it holds it as `.tmp` pending a "keep" rename, but **the complete content is already on disk**). Immediately read the newest `*.tmp` in `~/Downloads`, then `mv` it into `sweep_batches/<city>_<query>.json`.
-
-  Practically: after each search's download, run something like
-  `cd ~/Downloads && newest=$(ls -t *.tmp | head -1); mv "$newest" "<project>/sweep_batches/<city>_<query>.json"`
-
-- The extension occasionally disconnects mid-call or the CDP screenshot/click pipeline hangs (~300s timeout). The **JavaScript eval channel and `navigate` are the most reliable**; prefer them over coordinate-based clicks/screenshots. Retry on transient disconnects.
+### CRITICAL GOTCHA — browser → disk transfer
+Blocked channels: downloads-with-Save-As-prompt (dialog blocks), page→localhost POST (Private Network Access), large eval returns (tool view truncates ~1KB).
+**What works:** trigger a Blob download from the page (name it **`.txt`**, type `text/plain`). Chrome writes the FULL data to a random **`.tmp`** in `~/Downloads` (held pending rename, but content is complete). Immediately read the newest `*.tmp` and `mv` it to `sweep_batches/<city>_<query>.json`.
+- The user can smooth this by disabling Chrome → Settings → Downloads → "Ask where to save each file before downloading."
+- The extension occasionally disconnects / CDP screenshot+click pipeline hangs (~300s). The **JS eval channel and `navigate` are most reliable** — prefer them over coordinate clicks/screenshots. Retry on transient disconnects.
 
 ---
 
-## 4. Architecture & files
+## 5. Architecture & files
 
 ```
 auto-marketplace-tracker/
-├── marketplace_tracker.cjs   # CORE: ingest scrape batches → SQLite, dedup, price history, xlsx export
-├── lib/db.js                 # read-only SQLite query layer for the web app (filters/sort/facets)
+├── marketplace_tracker.cjs   # CORE: ingest scrape batches -> Postgres (dedup, history, price drops); xlsx export
+├── migrate_sqlite_to_pg.cjs  # one-time backfill of an old local listings.db into Postgres (already run)
+├── lib/
+│   ├── pg.js                 # shared Postgres pool + standard-PG schema (ensureSchema)
+│   ├── parse.js              # pure parsers + isVan/isJunk classifiers (shared by CLI and web)
+│   └── db.js                 # web-app read layer: queryListings / facets / priceHistory (Postgres)
 ├── app/
-│   ├── page.js               # the front-end UI (client component: sortable/filterable table)
+│   ├── page.js               # UI: sortable/filterable table (client component)
 │   ├── layout.js
-│   └── api/listings/route.js # JSON API the UI calls (GET /api/listings?…)
-├── next.config.mjs           # marks better-sqlite3 as a server-external package
-├── package.json
+│   └── api/listings/route.js # GET /api/listings?… (async; reads Postgres)
+├── next.config.mjs           # serverExternalPackages: ['pg','better-sqlite3']
+├── .env.example              # template; copy to .env.local with real DATABASE_URL
 ├── README.md
 ├── HANDOFF.md                # this file
-├── sweep_batches/            # raw scrape output (GITIGNORED)
-└── listings.db               # SQLite DB (GITIGNORED — it's data, regenerated by scraping)
+└── sweep_batches/            # raw scrape output (gitignored)
 ```
 
-### Data model (SQLite, `listings.db`)
-- **`listings`** — one row per UNIQUE listing (current state). Keyed by FB listing `id`. Columns include: `price_num`, `first_price` (price first time seen), `first_seen`, `last_seen`, `times_seen`, `is_active`, content `hash` (for change detection), `listed_date` (from FB, when available), plus parsed `year/make/model/trim/roof/wheelbase/drivetrain/mileage_num/city/state` and `raw_text`.
-- **`observations`** — append-only log; one row EVERY time a listing is seen (`id`, `seen_at`, `price_num`, `hash`, `raw_text`). This is what gives full **price history** over time. `listings` only holds the current state; `observations` remembers everything.
+### Data model (Postgres)
+- **`listings`** — one row per UNIQUE listing (current state), keyed by FB `id`: `price_num`, `first_price` (price first seen, never overwritten), `first_seen`, `last_seen`, `times_seen`, `is_active`, content `hash`, `listed_date`, parsed `year/make/model/trim/roof/wheelbase/drivetrain/mileage_num/city/state`, `raw_text`.
+- **`observations`** — append-only log; one row every time a listing is seen (`id`, `seen_at`, `price_num`, `hash`, `raw_text`) → full price history. `listings` = current state; `observations` = history.
 
-### Ingest behavior (already implemented & tested)
-- **Dedup by `id`**: new listings inserted with `first_seen`; existing ones update `last_seen`, bump `times_seen`.
-- **Change detection** via content `hash`; **price drops** detected when current `price_num` < previous.
-- **Deactivation is staleness-based, NOT single-batch-based.** Because each sweep is PARTIAL (van queries, subset of cities), a listing missing from one batch must NOT be marked gone. Listings are marked `is_active=0` only when `last_seen` is older than `staleDays` (default 7). **Keep this behavior** — do not revert to "deactivate everything not in this batch."
+### Ingest behavior (built & tested)
+- **Dedup by `id`** (UPSERT). New → insert with `first_seen`; existing → bump `last_seen`/`times_seen`.
+- **Change detection** via content `hash`; **price drops** when current < previous.
+- **Staleness-based deactivation:** mark `is_active=FALSE` only when `last_seen` older than `staleDays` (default 7). A PARTIAL sweep must NOT deactivate everything absent. **Keep this.**
+- **`first_price` is never updated** after insert.
 
 ### CLI
 ```bash
 node marketplace_tracker.cjs ingest <batch-or-merged.json> [--export]
-node marketplace_tracker.cjs export       # regenerate xlsx from listings.db
+node marketplace_tracker.cjs export        # regenerate xlsx from the DB
 ```
-Batch record shape: `[{ "id": "...", "text": "$45,000 | 2024 Mercedes-Benz sprinter ... | City, ST | 24K miles", "listed_rel": "Listed 3 weeks ago" (optional) }]`
-
-To ingest the whole `sweep_batches/` folder, merge files first (union + dedup by id) into one JSON array, then `ingest` it. (There was a `sweep_merged.json` produced this way.)
-
----
-
-## 5. Web front end
-
-- **Next.js (App Router) + React.** `lib/db.js` opens `listings.db` **read-only** (WAL mode lets it read while the scraper writes). `app/api/listings/route.js` exposes `GET /api/listings` with query params: `q, make, state, vansOnly, hideJunk, activeOnly, minPrice, maxPrice, maxMileage, sort, dir`. `app/page.js` renders a sortable, filterable table with make/state facets.
-- Defaults: **all vehicles** (Vans-only is an optional toggle, OFF by default), **Hide junk** ON.
-- Run it:
-  ```bash
-  npm install
-  npm run dev      # http://localhost:3000
-  ```
-- **Lock gotchas:** SQLite allows one writer; if DBeaver or another tool holds `listings.db`, an ingest may fail with "database is locked" — disconnect during ingests. The xlsx export auto-falls back to a timestamped filename if the primary `.xlsx` is open in Excel/OneDrive.
+Batch shape: `[{ "id":"...", "text":"$45,000 | 2024 Mercedes-Benz sprinter ... | City, ST | 24K miles", "listed_rel":"Listed 3 weeks ago" (optional) }]`
+To ingest the whole `sweep_batches/` folder: merge files (union + dedup by id) into one JSON array, then `ingest` it.
 
 ---
 
-## 6. Current state (as of this handoff)
+## 6. Web front end
 
-- Pipeline (ingest/dedup/history/price-drop/xlsx) **built and validated** with synthetic two-run tests.
-- **9 of ~20 planned searches done** (in `sweep_batches/`): greenville ×2, charlotte ×2, atlanta ×2, knoxville ×2, nashville ×1. → **286 unique listings** in `listings.db` (349 raw, 63 dupes removed).
-- Web UI built, running, rebranded to "Auto Marketplace Tracker," defaulting to all vehicles.
-- Git repo initialized; pushed to GitHub: **`angelluisares/auto-marketplace-tracker`** (private).
-
-### Data quality notes
-- Parsing of price/year/make/model/trim/location is clean for vans. The `cargo van` query pulls in older Ford Econoline/E-series/Chevy Express (legitimately vans) plus some noise.
-- **Junk** (rentals priced "$X/day", "parts out", accessories like "bench seat", $1–$50 scams, absurd prices) is **flagged, not deleted** — the user wanted everything kept with a flag. The UI's "Hide junk" toggle filters them out of view.
+- Next.js (App Router) + React. `lib/db.js` queries Postgres (async). `GET /api/listings` params: `q, make, state, vansOnly, hideJunk, activeOnly, minPrice, maxPrice, maxMileage, sort, dir`. `app/page.js` = sortable/filterable table with make/state facets.
+- Defaults: **all vehicles** (Vans-only optional, OFF), **Hide junk** ON.
+- Run: `npm run dev` → http://localhost:3000
 
 ---
 
-## 7. Next steps (in priority order)
+## 7. Migrating Neon → coworker's self-hosted Postgres (later)
 
-1. **Finish the sweep** — run the remaining ~11 city/query searches (nashville/cargo van, plus augusta, raleigh, charleston, birmingham, huntsville × their queries) to reach ~500–600 unique. Use the logged-out + city-substitution method above. Merge → `ingest --export`.
-2. **Broaden queries beyond vans** — since scope is now all vehicles, add queries/categories the user cares about (or scrape `/marketplace/<city>/vehicles` category pages, not just `search?query=`).
-3. **Repeat the sweep over multiple days** to start accumulating real `observations` history (price drops, days-listed). Eventually schedule it a few times/day.
-4. **Migrate to hosted Postgres + deploy** the Next.js app for multi-user access (the stated end goal). Add basic auth.
+The schema is standard Postgres, so this is a plain dump/restore — app code doesn't change, only `DATABASE_URL`:
+```bash
+pg_dump "<neon DATABASE_URL>" -Fc -f backup.dump
+pg_restore -d "<his server DATABASE_URL>" backup.dump
+# then update DATABASE_URL in each machine's .env.local
+```
 
 ---
 
-## 8. Things to preserve / not break
+## 8. CURRENT STATE — where to pick up
 
-- **Logged-out + city substitution is the chosen method.** Don't switch to logged-in scraping without a deliberate reason.
+- ✅ **Hosted Neon Postgres is live and is the source of truth.** Schema created; **286 listings + 286 observations migrated in** (from the original local SQLite scrape). Web app + CLI both point at it.
+- ✅ Repo is **public**: https://github.com/angelluisares/auto-marketplace-tracker
+- ⚠️ The old local `listings.db` and `sweep_batches/` are gitignored — a fresh clone has **code but no local data**. That's fine: the data now lives in the shared Postgres, which you reach via `.env.local`.
+
+### Scrape coverage so far
+- **9 of ~20 planned searches done** (greenville ×2, charlotte ×2, atlanta ×2, knoxville ×2, nashville ×1) → the 286 listings now in Postgres.
+- **NEXT STEP: finish the remaining ~11 searches** (nashville/cargo van; plus augusta, raleigh, charleston, birmingham, huntsville × their queries) using the logged-out + city-substitution method (§3–4). After each batch lands in `sweep_batches/`, merge and `node marketplace_tracker.cjs ingest <merged>.json` — it UPSERTs into the shared Postgres, so running it from EITHER machine adds to the same dataset.
+
+### Then
+- Broaden queries beyond vans (scope is all vehicles) — consider `/marketplace/<city>/vehicles` category pages, not just `search?query=`.
+- Re-run the sweep over multiple days to accumulate real `observations` history (price drops, days-listed). Eventually schedule it.
+- Deploy the Next.js app publicly + add auth (multi-user end goal).
+
+---
+
+## 9. Don't break these
+- **Logged-out + city substitution** is the chosen scraping method (don't switch to logged-in without a deliberate reason).
 - **Staleness-based deactivation** (don't deactivate on single-batch absence).
-- **`first_price` is never overwritten** after insert (preserves the original price for drop calculations).
-- **`listings.db`, `sweep_batches/`, `*.xlsx`, `node_modules/` are gitignored** — they're data/artifacts, not code.
-- The `.tmp`-read download trick is the working browser→disk transfer; the user can make it smoother by disabling Chrome's "ask where to save" prompt.
+- **`first_price` never overwritten** after insert.
+- **`.env*`, `node_modules/`, `sweep_batches/`, `*.xlsx`, `*.db` are gitignored** — never commit data or secrets (repo is public).
+- The `.tmp`-read trick is the working browser→disk transfer.

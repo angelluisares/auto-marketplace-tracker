@@ -3,11 +3,11 @@ import { queryListings, facets } from '../../../lib/db';
 
 export const dynamic = 'force-dynamic'; // always read fresh from the DB
 
-export function GET(req) {
+export async function GET(req) {
   const sp = req.nextUrl.searchParams;
   const bool = k => sp.get(k) === '1' || sp.get(k) === 'true';
   try {
-    const rows = queryListings({
+    const rows = await queryListings({
       q: sp.get('q') || undefined,
       make: sp.get('make') || undefined,
       state: sp.get('state') || undefined,
@@ -20,7 +20,8 @@ export function GET(req) {
       sort: sp.get('sort') || undefined,
       dir: sp.get('dir') || undefined,
     });
-    return NextResponse.json({ count: rows.length, facets: facets(), rows });
+    const f = await facets();
+    return NextResponse.json({ count: rows.length, facets: f, rows });
   } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
