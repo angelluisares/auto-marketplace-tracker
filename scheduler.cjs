@@ -24,6 +24,7 @@ function spawnNode(args) {
 
 async function runSearch(row) {
   const log = m => console.log(`[${new Date().toISOString()}] ${m}`);
+  const t0 = Date.now();
   const q = row.query;
   const cities = await metroStore.enabledCitiesFor(row.region);
   if (q) {
@@ -36,7 +37,7 @@ async function runSearch(row) {
   }
   const parsed = store.rowToParsed(row);
   const matches = await store.matchListings(parsed);
-  await store.recordRun(parsed, matches.length, row.region); // updates last_run_at, last_found, next_run_at
+  await store.recordRun(parsed, matches.length, row.region, Date.now() - t0); // updates last_run_at, last_found, duration, next_run_at
   log(`done "${row.text}" -> ${matches.length} matches`);
 }
 

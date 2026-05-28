@@ -30,8 +30,9 @@ a local web UI, backed by a shared hosted Postgres.
 - **`listings`** — one row per unique listing (current state): price, `first_price`,
   `first_seen`, `last_seen`, `times_seen`, `is_active`, parsed year/make/model/…, `hash`.
 - **`observations`** — append-only log; one row each time a listing is seen → price history.
-- **`searches`** — saved searches: text, parsed query/filters, `region`, run stats, and
-  scheduling (`scheduled`, `interval_minutes`, `next_run_at`).
+- **`searches`** — saved searches: text, parsed query/filters, `region`, run stats
+  (`run_count`, `last_found`, `last_duration_ms`), and scheduling (`scheduled`,
+  `interval_minutes`, `next_run_at`).
 - **`metros`** — the metro catalog (`slug`, `region`, `label`, `enabled`); seeded from
   `grid.cjs`. Searches/scheduled runs scrape only the **enabled** metros in the region.
 

@@ -77,8 +77,9 @@ web app connect to the same DB over the network.
 - **`observations`** — append-only; one row every time a listing is seen → price history.
 - **`searches`** — saved searches. Columns: `text` (unique, the raw query string), parsed
   `query/max_miles/max_price/min_year/max_year`, `region`, `run_count`, `last_run_at`,
-  `last_found`, and scheduling `scheduled`/`interval_minutes`/`next_run_at`. Created lazily
-  by `lib/searchStore.js`.
+  `last_found`, `last_duration_ms` (how long the last run took — shown as a live timer on
+  `/search` and a "Took" column on `/searches`), and scheduling
+  `scheduled`/`interval_minutes`/`next_run_at`. Created lazily by `lib/searchStore.js`.
 - **`metros`** — the metro catalog: `slug` (PK), `region`, `label`, `enabled`. Seeded from
   `lib/grid.cjs` by `lib/metroStore.js`. Searches/scheduled runs scrape only the **enabled**
   metros in the chosen region. The `/metros` page toggles these.

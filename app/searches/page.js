@@ -24,6 +24,14 @@ function ago(ts) {
   return fut ? `in ${out}` : `${out} ago`;
 }
 
+function fmtDur(ms) {
+  if (ms == null) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60), r = s % 60;
+  return r ? `${m}m ${r}s` : `${m}m`;
+}
+
 function chips(s) {
   const c = [];
   if (s.max_miles != null) c.push(`≤ ${s.max_miles.toLocaleString()} mi`);
@@ -85,7 +93,7 @@ export default function SearchesPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Search</th><th>Last run</th><th className="num">Found</th><th className="num">Runs</th>
+                  <th>Search</th><th>Last run</th><th className="num">Took</th><th className="num">Found</th><th className="num">Runs</th>
                   <th>Schedule</th><th>Next run</th><th>Actions</th>
                 </tr>
               </thead>
@@ -101,6 +109,7 @@ export default function SearchesPage() {
                         </div>
                       </td>
                       <td>{ago(s.last_run_at)}</td>
+                      <td className="num">{fmtDur(s.last_duration_ms)}</td>
                       <td className="num">{s.last_found ?? '—'}</td>
                       <td className="num">{s.run_count}</td>
                       <td>
@@ -117,7 +126,7 @@ export default function SearchesPage() {
                     </tr>
                     {expanded === s.id && (
                       <tr className="exp">
-                        <td colSpan={7}>
+                        <td colSpan={8}>
                           {results.loading ? <div className="muted">Loading matches…</div>
                             : results.rows.length === 0 ? <div className="muted">No current matches in the DB for this search.</div>
                             : (

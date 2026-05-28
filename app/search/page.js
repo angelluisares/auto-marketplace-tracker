@@ -19,16 +19,25 @@ const REGION_OPTS = [
 
 function fmtMoney(v) { return v != null ? '$' + v.toLocaleString() : ''; }
 function fmtNum(v) { return v != null ? v.toLocaleString() : ''; }
+function fmtDur(ms) {
+  if (ms == null) return '';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60), r = s % 60;
+  return r ? `${m}m ${r}s` : `${m}m`;
+}
 
 export default function SearchPage() {
   const [text, setText] = useState('');
   const [region, setRegion] = useState('eastern');
   const [job, setJob] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const timer = useRef(null);
+  const tickRef = useRef(null);
   const auto = useRef(false);
 
-  useEffect(() => () => clearInterval(timer.current), []);
+  useEffect(() => () => { clearInterval(timer.current); clearInterval(tickRef.current); }, []);
 
   const start = useCallback(async (override, regionOverride) => {
     const q = (typeof override === 'string' ? override : text).trim();
@@ -39,6 +48,11 @@ export default function SearchPage() {
     setBusy(true);
     setJob({ status: 'scraping', citiesDone: 0, citiesTotal: 0, parsed: null });
     clearInterval(timer.current);
+    clearInterval(tickRef.current);
+    setElapsed(0);
+    const t0 = Date.now();
+    tickRef.current = setInterval(() => setElapsed(Date.now() - t0), 1000);
+    const stop = () => { clearInterval(timer.current); clearInterval(tickRef.current); setBusy(false); };
     try {
       const res = await fetch('/api/search', {
         method: 'POST',
@@ -46,17 +60,17 @@ export default function SearchPage() {
         body: JSON.stringify({ text: q, region: reg }),
       });
       const j = await res.json();
-      if (!res.ok) { setJob({ status: 'error', error: j.error || 'failed to start' }); setBusy(false); return; }
+      if (!res.ok) { setJob({ status: 'error', error: j.error || 'failed to start' }); stop(); return; }
       setJob(j);
       timer.current = setInterval(async () => {
         const r = await fetch('/api/search?id=' + j.id);
         const cur = await r.json();
         setJob(cur);
-        if (cur.status === 'done' || cur.status === 'error') { clearInterval(timer.current); setBusy(false); }
+        if (cur.status === 'done' || cur.status === 'error') stop();
       }, 1500);
     } catch (e) {
       setJob({ status: 'error', error: String(e.message || e) });
-      setBusy(false);
+      stop();
     }
   }, [text, region, busy]);
 
@@ -122,6 +136,9 @@ export default function SearchPage() {
             <span className="spinner" />
             <strong>{STATUS_LABEL[job.status] || job.status}</strong>
             {job.status === 'scraping' && <span>&nbsp;· {job.citiesDone}/{job.citiesTotal} metros</span>}
+            <span className="elapsed">
+              {fmtDur(elapsed)} elapsed{job.citiesTotal ? ` · ~${fmtDur(job.citiesTotal * 40000)} expected` : ''}
+            </span>
           </div>
           <div className="bar"><div className="fill" style={{ width: (job.status === 'scraping' ? pct : 100) + '%' }} /></div>
         </div>
@@ -131,7 +148,10 @@ export default function SearchPage() {
 
       {job?.status === 'done' && (
         <>
-          <div className="resulthead">{job.found} match{job.found === 1 ? '' : 'es'} found</div>
+          <div className="resulthead">
+            {job.found} match{job.found === 1 ? '' : 'es'} found
+            {(job.durationMs || elapsed) ? ` · took ${fmtDur(job.durationMs || elapsed)}` : ''}
+          </div>
           {rows.length === 0
             ? <div className="empty">No matches. Try fewer/looser terms (e.g. drop the mileage cap).</div>
             : (
@@ -181,6 +201,7 @@ export default function SearchPage() {
         .chip.q { background: #1f4e78; color: #fff; border-color: #1f4e78; font-weight: 600; }
         .status { margin: 16px 0; }
         .statusrow { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+        .statusrow .elapsed { margin-left: auto; color: #666; font-variant-numeric: tabular-nums; }
         .bar { margin-top: 8px; height: 8px; background: #e3e6ea; border-radius: 6px; overflow: hidden; }
         .fill { height: 100%; background: #1f4e78; transition: width .4s ease; }
         .spinner { width: 14px; height: 14px; border: 2px solid #c3d2e0; border-top-color: #1f4e78; border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; }
