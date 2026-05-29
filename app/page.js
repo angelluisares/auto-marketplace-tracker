@@ -22,7 +22,7 @@ export default function Page() {
   const [models, setModels] = useState([]);
   const [f, setF] = useState({
     q: '', make: '', model: '', state: '', hideJunk: true, activeOnly: false,
-    minPrice: '', maxPrice: '', maxMileage: '', sort: 'last_seen', dir: 'desc',
+    minPrice: '', maxPrice: '', maxMileage: '', minYear: '', maxYear: '', sort: 'last_seen', dir: 'desc',
   });
 
   const load = useCallback(async () => {
@@ -86,6 +86,8 @@ export default function Page() {
         <input type="number" placeholder="Min $" value={f.minPrice} onChange={e => set('minPrice', e.target.value)} style={{ width: 80 }} />
         <input type="number" placeholder="Max $" value={f.maxPrice} onChange={e => set('maxPrice', e.target.value)} style={{ width: 90 }} />
         <input type="number" placeholder="Max miles" value={f.maxMileage} onChange={e => set('maxMileage', e.target.value)} style={{ width: 100 }} />
+        <input type="number" placeholder="Min year" value={f.minYear} onChange={e => set('minYear', e.target.value)} style={{ width: 85 }} />
+        <input type="number" placeholder="Max year" value={f.maxYear} onChange={e => set('maxYear', e.target.value)} style={{ width: 85 }} />
         <label><input type="checkbox" checked={f.hideJunk} onChange={e => set('hideJunk', e.target.checked)} /> Hide junk</label>
         <label><input type="checkbox" checked={f.activeOnly} onChange={e => set('activeOnly', e.target.checked)} /> Active only</label>
       </div>

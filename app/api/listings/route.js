@@ -17,6 +17,8 @@ export async function GET(req) {
       minPrice: sp.get('minPrice') || undefined,
       maxPrice: sp.get('maxPrice') || undefined,
       maxMileage: sp.get('maxMileage') || undefined,
+      minYear: sp.get('minYear') || undefined,
+      maxYear: sp.get('maxYear') || undefined,
       sort: sp.get('sort') || undefined,
       dir: sp.get('dir') || undefined,
     });
